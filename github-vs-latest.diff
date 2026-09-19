@@ -1,0 +1,147 @@
+diff --git a/package.json b/package.json
+index ef4b83e..256a7c7 100644
+--- a/package.json
++++ b/package.json
+@@ -39,7 +39,8 @@
+   },
+   "overrides": {
+     "react": "^19.0.0",
+-    "react-dom": "^19.0.0"
++    "react-dom": "^19.0.0",
++    "@supabase/supabase-js": "^2.45.4"
+   },
+   "engines": {
+     "node": ">=18.18.0"
+diff --git a/src/lib/data/activity.ts b/src/lib/data/activity.ts
+index c27d102..f52dd34 100644
+--- a/src/lib/data/activity.ts
++++ b/src/lib/data/activity.ts
+@@ -1,8 +1,7 @@
+-import type { SupabaseClient } from '@supabase/supabase-js';
+-import type { Database } from '@/lib/types/database.types';
++import type { TypedSupabaseClient } from '@/lib/supabase/server';
+ import type { ActivityFeedItem } from '@/lib/types/domain';
+ 
+-export async function getRecentActivity(supabase: SupabaseClient<Database>, limit = 12) {
++export async function getRecentActivity(supabase: TypedSupabaseClient, limit = 12) {
+   const { data, error } = await supabase
+     .from('activity_feed')
+     .select('id, type, message, created_at')
+diff --git a/src/lib/data/admin.ts b/src/lib/data/admin.ts
+index 4e70075..0d357c9 100644
+--- a/src/lib/data/admin.ts
++++ b/src/lib/data/admin.ts
+@@ -1,8 +1,7 @@
+-import type { SupabaseClient } from '@supabase/supabase-js';
+-import type { Database } from '@/lib/types/database.types';
++import type { TypedSupabaseClient } from '@/lib/supabase/server';
+ import type { Profile, Wallet, WalletTransaction } from '@/lib/types/domain';
+ 
+-type Client = SupabaseClient<Database>;
++type Client = TypedSupabaseClient;
+ 
+ export async function getAdminOverviewStats(supabase: Client) {
+   const [{ count: totalUsers }, { count: pendingCount }, { data: wallets }] = await Promise.all([
+diff --git a/src/lib/data/business.ts b/src/lib/data/business.ts
+index f6f0f2d..928ba01 100644
+--- a/src/lib/data/business.ts
++++ b/src/lib/data/business.ts
+@@ -1,14 +1,13 @@
+-import type { SupabaseClient } from '@supabase/supabase-js';
+-import type { Database } from '@/lib/types/database.types';
++import type { TypedSupabaseClient } from '@/lib/supabase/server';
+ import type { BusinessType } from '@/lib/types/domain';
+ 
+-export async function getBusinessCatalog(supabase: SupabaseClient<Database>) {
++export async function getBusinessCatalog(supabase: TypedSupabaseClient) {
+   const { data, error } = await supabase.from('business_types').select('*').order('sort_order');
+   if (error) throw error;
+   return (data ?? []) as BusinessType[];
+ }
+ 
+-export async function getUserBusinessSelectionIds(supabase: SupabaseClient<Database>, userId: string) {
++export async function getUserBusinessSelectionIds(supabase: TypedSupabaseClient, userId: string) {
+   const { data, error } = await supabase
+     .from('business_selections')
+     .select('business_type_id')
+diff --git a/src/lib/data/wallet.ts b/src/lib/data/wallet.ts
+index 153716f..e70f821 100644
+--- a/src/lib/data/wallet.ts
++++ b/src/lib/data/wallet.ts
+@@ -1,8 +1,7 @@
+-import type { SupabaseClient } from '@supabase/supabase-js';
+-import type { Database } from '@/lib/types/database.types';
++import type { TypedSupabaseClient } from '@/lib/supabase/server';
+ import type { WalletTransaction } from '@/lib/types/domain';
+ 
+-type Client = SupabaseClient<Database>;
++type Client = TypedSupabaseClient;
+ 
+ export async function getRecentTransactions(supabase: Client, userId: string, limit = 10) {
+   const { data, error } = await supabase
+diff --git a/src/lib/supabase/admin.ts b/src/lib/supabase/admin.ts
+index 9d1f83d..39b6d68 100644
+--- a/src/lib/supabase/admin.ts
++++ b/src/lib/supabase/admin.ts
+@@ -30,3 +30,6 @@ export function createAdminClient() {
+     auth: { autoRefreshToken: false, persistSession: false },
+   });
+ }
++
++/** Derived the same way as TypedSupabaseClient in lib/supabase/server.ts — see that file's comment. */
++export type TypedSupabaseAdminClient = ReturnType<typeof createAdminClient>;
+diff --git a/src/lib/supabase/client.ts b/src/lib/supabase/client.ts
+index 836685c..46cdc06 100644
+--- a/src/lib/supabase/client.ts
++++ b/src/lib/supabase/client.ts
+@@ -13,3 +13,6 @@ export function createClient() {
+   const { url, anonKey } = getSupabaseEnv();
+   return createBrowserClient<Database>(url, anonKey);
+ }
++
++/** Derived the same way as TypedSupabaseClient in lib/supabase/server.ts — see that file's comment. */
++export type TypedSupabaseBrowserClient = ReturnType<typeof createClient>;
+diff --git a/src/lib/supabase/server.ts b/src/lib/supabase/server.ts
+index 58398b2..5c8d41e 100644
+--- a/src/lib/supabase/server.ts
++++ b/src/lib/supabase/server.ts
+@@ -32,3 +32,16 @@ export async function createClient() {
+     },
+   });
+ }
++
++/**
++ * The single source of truth for "what type is a server-side Supabase
++ * client". Every function that accepts a `supabase` client as a parameter
++ * (see src/lib/data/*.ts) should use this type rather than reconstructing
++ * `SupabaseClient<Database>` from `@supabase/supabase-js` itself — deriving
++ * it from createClient()'s actual return type guarantees they can never
++ * drift apart, even if `@supabase/ssr` and `@supabase/supabase-js` resolve
++ * to slightly different versions in the dependency tree (the root cause of
++ * the "Type mismatch between SupabaseClient<Database> ... and the type
++ * expected by ..." build error this type exists to prevent).
++ */
++export type TypedSupabaseClient = Awaited<ReturnType<typeof createClient>>;
+diff --git a/src/lib/types/database.types.ts b/src/lib/types/database.types.ts
+index 084c0d5..d44b01e 100644
+--- a/src/lib/types/database.types.ts
++++ b/src/lib/types/database.types.ts
+@@ -77,7 +77,17 @@ export interface Database {
+           created_at: string;
+           updated_at: string;
+         };
+-        Insert: Partial<Database['public']['Tables']['wallet_transactions']['Row']> & {
++        // Omit + intersect, not `Partial<Row> & {...}` — intersecting an
++        // object type with a *different* type for a property it already
++        // has doesn't override that property, it narrows it (TypeScript
++        // computes `(string | undefined) & (string | number)` as `string`,
++        // silently dropping `number`). Omitting the keys we're widening
++        // from the Partial<Row> base first is what actually makes `amount`
++        // accept the coerced `number` that lib/actions/{wallet,admin}.ts
++        // insert.
++        Insert: Partial<
++          Omit<Database['public']['Tables']['wallet_transactions']['Row'], 'type' | 'amount'>
++        > & {
+           type: 'deposit' | 'withdrawal' | 'adjustment';
+           amount: string | number;
+         };
