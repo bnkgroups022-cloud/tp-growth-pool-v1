@@ -1,0 +1,51 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Install & build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Cache npm's download cache (~/.npm) rather than relying on
+      # actions/setup-node's built-in `cache: npm` option, which requires a
+      # committed package-lock.json to compute its key. This project
+      # intentionally doesn't commit one yet (see README "Dependency
+      # resolution notes") — the cache key is based on package.json instead,
+      # so this still works and simply won't hit on the very first run.
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
+      # Prefer `npm ci` (fast, reproducible) whenever a lockfile is present;
+      # fall back to `npm install` when it isn't. .npmrc (legacy-peer-deps=true)
+      # is committed in this repo, so either command picks it up automatically.
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            echo "package-lock.json found — using npm ci"
+            npm ci
+          else
+            echo "No package-lock.json — using npm install"
+            npm install
+          fi
+
+      - name: Build (fails the workflow on any TypeScript or Next.js build error)
+        run: npm run build
